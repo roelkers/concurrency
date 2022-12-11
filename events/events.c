@@ -3,17 +3,20 @@
 #include <semaphore.h>
 #include <pthread.h>
 
-static int bufferPos = 0;
-static char buffer[10] = "hellohello"; 
+static int buffer[10];
+static int bufferRead[10] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+
 static sem_t sem;
 static sem_t sem2;
 static pthread_mutex_t mutex;
 
 enum {
-    N_PRODUCERS = 2,
-    N_CONSUMERS = 2,
+    N_PRODUCERS = 4,
+    N_CONSUMERS = 4,
     MAX_BUF_LENGTH = 10
 };
+
+static int producerIds[5] = { 0,1,2,3,4 };
 
 #define errExit(msg) do { perror(msg); exit(EXIT_FAILURE); \
                                } while (0)
@@ -42,27 +45,36 @@ static void consumerPost() {
   }
 }
 
-/* static void insertNewBuffer(int loop, int prodNr, char buf[10]) { */
-/*    char current; */
-/*    sprintf(char, "%d", prodNr); */ 
-/*    buf[bufferPos] = current; */
-/* } */
+static int getBufferRead(int value) {
+    for (size_t i = 0; i < MAX_BUF_LENGTH; i++) {
+        if(bufferRead[i] == value) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 static void *producersFunc(void *arg)
 {
     int prodNr = *((int *) arg); 
+    printf("prodNr is %i\n", prodNr);
     char current;
-    for (size_t i = 0; i < 4; i++) {
+    int bufferPos = 0;
+    printf("producer starting\n");
+    for (size_t i = 0; i < 1000; i++) {
 
         pthread_mutex_lock(&mutex);
-        if(bufferPos == MAX_BUF_LENGTH) {
+        bufferPos = getBufferRead(1);
+        while(bufferPos == -1) {
           pthread_mutex_unlock(&mutex);
           producerWait();
+          pthread_mutex_lock(&mutex);
+          bufferPos = getBufferRead(1);
         }
-        bufferPos--;
-        //current = itoa(prodNr); 
+        bufferRead[bufferPos] = 0;
+        printf("bufferPos %i producer writes %i\n", bufferPos, prodNr);
 
-        buffer[bufferPos] = 'A';
+        buffer[bufferPos] = prodNr;
         pthread_mutex_unlock(&mutex);
         consumerPost();
     }
@@ -74,20 +86,24 @@ static void *consumersFunc(void *arg)
 {
     long loops = *((long *) arg);
     char buffer_copy;
+    int bufferPos = 0;
     for (size_t i = 0; i < loops; i++) {
         printf("consumer starting\n");
 
         pthread_mutex_lock(&mutex);
-        if(bufferPos == 0) {
+        bufferPos = getBufferRead(0);
+        while(bufferPos == -1) {
           pthread_mutex_unlock(&mutex);
           consumerWait();
+          pthread_mutex_lock(&mutex);
+          bufferPos = getBufferRead(0);
         }
-        bufferPos--;
+        bufferRead[bufferPos] = 1;
+        printf("bufferPos %i consumer reads bufcontents %i\n", bufferPos, buffer_copy);
+
         buffer_copy = buffer[bufferPos];
         pthread_mutex_unlock(&mutex);
         producerPost();
-        
-        printf("consumer reads bufcontents %c\n", buffer_copy);
     }
 
     return NULL;
@@ -97,7 +113,7 @@ int main(int argc, char *argv[]) {
     pthread_t producers[N_PRODUCERS];
     pthread_t consumers[N_CONSUMERS];
     int s;
-    long nloops = 4;
+    long nloops = 1000;
 
     if(pthread_mutex_init(&mutex, NULL) != 0) {
         printf("\n mutex init failed\n");
@@ -108,9 +124,10 @@ int main(int argc, char *argv[]) {
         errExit("sem_init");
     if (sem_init(&sem2, 0, 0) == -1)
         errExit("sem_init");
-
+    
     for (int i = 1; i <= N_PRODUCERS; ++i) {
-        s = pthread_create(&producers[i], NULL, producersFunc, &i);
+        printf("init producer %i\n", i);
+        s = pthread_create(&producers[i], NULL, producersFunc, &producerIds[i]);
         if (s != 0)
             errExit("pthread_create");
     }
